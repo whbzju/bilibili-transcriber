@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>B 站音频转录工具</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>B 站音频转录工具</h1>
+            <p class="muted">输入 BV/视频链接/UP 主空间链接，生成音频、字幕和索引。</p>
+          </div>
+          <button class="ghost" id="refreshStatus" type="button">刷新状态</button>
+        </header>
+
+        <form id="jobForm" class="panel">
+          <label class="wide">
+            <span>视频或空间链接</span>
+            <input
+              id="url"
+              name="url"
+              required
+              placeholder="https://www.bilibili.com/video/BV... 或 BV..."
+              autocomplete="off"
+            />
+          </label>
+
+          <label>
+            <span>任务名</span>
+            <input id="name" name="name" placeholder="可留空" autocomplete="off" />
+          </label>
+
+          <label>
+            <span>范围</span>
+            <select id="scope" name="scope">
+              <option value="input">单条/输入链接</option>
+              <option value="uploader">从该 UP 主扩展</option>
+            </select>
+          </label>
+
+          <label>
+            <span>最多视频数</span>
+            <input id="maxVideos" name="maxVideos" type="number" min="0" step="1" value="1" />
+          </label>
+
+          <details class="wide advanced"><summary>高级设置</summary><div class="settingsGrid">
+          <label>
+            <span>登录状态来源</span>
+            <select id="cookiesMode" name="cookiesMode">
+              <option value="browser">本机浏览器登录状态</option>
+              <option value="none">不用 Cookie</option>
+              <option value="file">cookies.txt</option>
+            </select>
+          </label>
+
+          <label>
+            <span>浏览器/Profile</span>
+            <input id="cookiesBrowser" name="cookiesBrowser" value="chrome" autocomplete="off" />
+          </label>
+
+          <label>
+            <span>Cookie 文件</span>
+            <input id="cookiesFile" name="cookiesFile" placeholder="/absolute/path/cookies.txt" autocomplete="off" />
+          </label>
+
+          <label>
+            <span>转写后端</span>
+            <select id="backend" name="backend">
+              <option value="faster">faster-whisper</option>
+              <option value="mlx">MLX Whisper</option>
+              <option value="openai">openai-whisper</option>
+            </select>
+          </label>
+
+          <label>
+            <span>模型</span>
+            <input id="model" name="model" value="small" autocomplete="off" />
+          </label>
+
+          <label>
+            <span>Python</span>
+            <select id="pythonMode" name="pythonMode">
+              <option value="python3">python3</option>
+              <option value="conda">conda env</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Conda 环境</span>
+            <input id="condaEnv" name="condaEnv" value="video-trans" autocomplete="off" />
+          </label>
+
+          <fieldset class="toggles wide">
+            <label><input id="transcribe" type="checkbox" checked /> 转写字幕</label>
+            <label><input id="buildIndex" type="checkbox" checked /> 生成索引</label>
+            <label><input id="directFallback" type="checkbox" checked /> B 站直连兜底</label>
+            <label><input id="overwrite" type="checkbox" /> 覆盖已存在音频</label>
+            <label><input id="overwriteTranscripts" type="checkbox" /> 覆盖已存在转写</label>
+          </fieldset>
+          </div></details>
+
+          <div class="actions wide">
+            <button class="primary" type="submit">开始任务</button>
+            <button class="ghost" id="stopJob" type="button" disabled>停止当前任务</button>
+            <button class="ghost" id="retryJob" type="button" disabled>续跑失败步骤</button>
+            <span class="muted" id="formHint"></span>
+          </div>
+        </form>
+
+        <section class="split">
+          <div class="panel">
+            <div class="sectionTitle">
+              <h2>任务</h2>
+              <button class="ghost compact" id="refreshJobs" type="button">刷新</button>
+            </div>
+            <div id="jobList" class="jobList"></div>
+          </div>
+
+          <details class="panel">
+            <summary>运行环境</summary>
+            <div class="sectionTitle">
+              <h2>依赖</h2>
+            </div>
+            <div id="statusGrid" class="statusGrid"></div>
+          </details>
+        </section>
+
+        <section class="panel">
+          <div class="sectionTitle">
+            <h2>产物</h2>
+            <span id="artifactCount" class="muted"></span>
+          </div>
+          <div id="artifactList" class="artifactList"></div>
+          <div id="previewPanel" hidden>
+            <div class="actions"><strong id="previewTitle"></strong><button type="button" class="ghost compact" id="copyTranscript">复制全文</button></div>
+            <pre id="transcriptPreview" tabindex="0"></pre>
+          </div>
+        </section>
+
+        <details class="panel consolePanel">
+          <summary>运行日志</summary>
+          <div class="sectionTitle">
+            <h2>日志</h2>
+            <span id="activeJobLabel" class="muted"></span>
+          </div>
+          <pre id="logBox" class="logBox"></pre>
+        </details>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

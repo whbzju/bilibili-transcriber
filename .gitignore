@@ -1,0 +1,17 @@
+data/
+bilibili_BV*/
+*.log
+.env
+.env.*
+*cookies*.txt
+*cookies*.json
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.DS_Store
+*.m4a
+*.m4s
+*.mp3
+*.wav
+*.mp4
