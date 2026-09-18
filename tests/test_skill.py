@@ -11,6 +11,11 @@ spec = importlib.util.spec_from_file_location('bili', SCRIPT)
 bili = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bili)
 
+TRANSCRIBER = SCRIPT.with_name('transcribe_audio_local.py')
+transcriber_spec = importlib.util.spec_from_file_location('transcribe_audio_local', TRANSCRIBER)
+transcriber = importlib.util.module_from_spec(transcriber_spec)
+transcriber_spec.loader.exec_module(transcriber)
+
 
 class SkillTests(unittest.TestCase):
     def test_setup_permission_preserves_existing_data(self):
@@ -68,6 +73,34 @@ class SkillTests(unittest.TestCase):
             self.assertEqual(result['status'], 'succeeded')
             self.assertEqual(len(result['files']), 1)
             self.assertFalse((directory / 'worker.lock').exists())
+
+    def test_downloaded_manifest_passes_transcriber_selection(self):
+        # 回归测试：下载阶段写出的 manifest 必须带 status，否则会被 select_items 全部过滤，
+        # 实际表现为 selectedCount=0，最终误报“转录未完整成功”。mock 掉下载与转录命令，
+        # 但用真实的 manifest 内容和真实的 select_items 校验两者之间的契约。
+        from subprocess import CompletedProcess
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'BILI_HOME': temp}):
+            directory = bili.job_dir('BV1mZYj6VEwb-small')
+            directory.mkdir(parents=True)
+            bili.save(directory / 'job.json', {'id': directory.name, 'bvid': 'BV1mZYj6VEwb', 'model': 'small', 'browser': None})
+            def run(command, **kwargs):
+                if 'yt_dlp' in command:
+                    (directory / 'audio.m4a').write_bytes(b'audio')
+                    bili.save(directory / 'audio.info.json', {'title': '标题', 'duration': 12, 'uploader': 'up'})
+                    return CompletedProcess(command, 0)
+                output = directory / 'transcripts/small'
+                output.mkdir(parents=True, exist_ok=True)
+                bili.save(output / 'transcription-summary.json', {'failureCount': 0})
+                (output / 'video.srt').write_text('1\n00:00:00,000 --> 00:00:01,000\n测试')
+                return CompletedProcess(command, 0)
+            with patch.object(bili.subprocess, 'run', side_effect=run):
+                bili.worker(directory.name)
+            manifest = json.loads((directory / 'audio-manifest.json').read_text())
+            self.assertEqual(len(manifest), 1)
+            self.assertIn(manifest[0].get('status'), {'downloaded', 'exists'})
+            transcriber.START_INDEX, transcriber.END_INDEX, transcriber.MAX_EPISODES = 0, 0, 0
+            self.assertEqual(len(transcriber.select_items(manifest)), 1)
+            self.assertEqual(bili.status(directory.name)['status'], 'succeeded')
 
     def test_download_failure_is_recoverable(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'BILI_HOME': temp}):
