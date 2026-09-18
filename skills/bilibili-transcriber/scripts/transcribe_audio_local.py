@@ -50,8 +50,7 @@ VAD_FILTER = (os.environ.get("AUDIO_VAD_FILTER") or "1") == "1"
 
 def timestamp(seconds: float) -> str:
     seconds = max(0.0, float(seconds or 0.0))
-    whole = int(seconds)
-    ms = int(round((seconds - whole) * 1000))
+    whole, ms = divmod(int(round(seconds * 1000)), 1000)
     h = whole // 3600
     m = (whole % 3600) // 60
     s = whole % 60
@@ -269,9 +268,24 @@ def main() -> int:
         json_file = base.with_suffix(".json")
 
         if json_file.exists() and not OVERWRITE:
-            skipped += 1
-            print(f"[skip] {ordinal}/{len(selected)} #{item.get('index')} {item.get('title')}")
-            continue
+            try:
+                cached = json.loads(json_file.read_text(encoding="utf-8"))
+                result = cached["transcript"]
+                if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
+                    raise ValueError("Invalid cached transcript")
+            except (ValueError, KeyError, TypeError):
+                # An interrupted JSON write is not a completed transcription.
+                pass
+            else:
+                try:
+                    # Rebuild exports even if the previous run stopped mid-write.
+                    write_text_outputs(item, result, base)
+                    skipped += 1
+                    print(f"[reuse] {ordinal}/{len(selected)} #{item.get('index')} {item.get('title')}")
+                except Exception as exc:
+                    failures.append({"index": item.get("index"), "title": item.get("title"), "error": str(exc)})
+                    print(f"[fail] #{item.get('index')} {exc}", file=sys.stderr)
+                continue
 
         if not audio_file.exists():
             failures.append({"index": item.get("index"), "title": item.get("title"), "error": "audio file missing"})

@@ -1,4 +1,6 @@
 import importlib.util
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -16,6 +18,47 @@ transcribe_spec.loader.exec_module(transcriber)
 
 
 class SkillTests(unittest.TestCase):
+    def test_timestamp_carries_milliseconds(self):
+        for value, expected in [(59.9999, '00:01:00,000'), (3599.9999, '01:00:00,000'),
+                                (1.234, '00:00:01,234'), (-1, '00:00:00,000')]:
+            with self.subTest(value=value):
+                self.assertEqual(transcriber.srt_timestamp(value), expected)
+
+    def check_transcript_recovery(self, cached_json, expected_calls):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / 'audio.m4a'
+            audio.write_bytes(b'audio')
+            item = {'index': 1, 'title': 'test', 'status': 'downloaded', 'audioFile': str(audio)}
+            manifest = root / 'audio-manifest.json'
+            manifest.write_text(json.dumps([item]))
+            output = root / 'out'
+            output.mkdir()
+            base = output / transcriber.safe_stem(item)
+            result = {'text': 'hello', 'segments': [{'start': 59.9999, 'end': 61, 'text': 'hello'}]}
+            base.with_suffix('.json').write_text(cached_json or json.dumps({'transcript': result}))
+            base.with_suffix('.txt').write_text('partial')
+            base.with_suffix('.srt').touch()
+            with patch.multiple(transcriber, MANIFEST_FILE=manifest, OUTPUT_DIR=output,
+                                OVERWRITE=False, START_INDEX=0, END_INDEX=0, MAX_EPISODES=0), \
+                    patch.object(transcriber, 'load_transcriber', return_value=object()), \
+                    patch.object(transcriber, 'transcribe_audio', return_value=result) as recognize, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(transcriber.main(), 0)
+            self.assertEqual(recognize.call_count, expected_calls)
+            self.assertEqual(base.with_suffix('.txt').read_text(), 'hello\n')
+            self.assertIn('00:01:00,000 --> 00:01:01,000', base.with_suffix('.srt').read_text())
+            self.assertTrue(base.with_suffix('.md').is_file())
+            summary = json.loads((output / 'transcription-summary.json').read_text())
+            self.assertEqual(summary['failureCount'], 0)
+            self.assertEqual(summary['skippedExistingCount'], 1 - expected_calls)
+
+    def test_resume_restores_partial_exports_from_json(self):
+        self.check_transcript_recovery(None, 0)
+
+    def test_resume_retranscribes_truncated_json(self):
+        self.check_transcript_recovery('{', 1)
+
     def test_setup_permission_preserves_existing_data(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'BILI_HOME': temp}):
             for name in ['runtime', 'jobs', 'cache']:
