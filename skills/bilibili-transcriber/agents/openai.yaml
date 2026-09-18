@@ -1,0 +1,4 @@
+interface:
+  display_name: "B 站视频转录"
+  short_description: "下载 B 站音频并本地转录完整字幕，支持环境检查、失败续跑和内容总结"
+  default_prompt: "使用 $bilibili-transcriber 检查本机环境，把这个 B 站视频转成完整字幕并总结。"

@@ -1,5 +1,26 @@
 # B 站音频转录工具
 
+## Codex Skill（实验版）
+
+与 WorkBuddy 共用同一个 Skill 和本地转录程序，支持 macOS 本地 Codex 桌面端或 CLI，不适用于云端执行环境。
+
+在 Codex 对话中发送：
+
+```text
+请使用 $skill-installer 安装这个 Skill：
+https://github.com/whbzju/bilibili-transcriber/tree/v0.2.0-alpha.2/skills/bilibili-transcriber
+```
+
+安装后在新会话中使用：
+
+```text
+使用 $bilibili-transcriber 检查环境，把这个 B 站视频转成完整字幕并总结：视频链接。
+```
+
+需要登录时补充“复用我本机 Chrome 的登录状态”。Skill 安装与 Python 依赖初始化是两步：首次使用会执行环境检查，必要时协助安装依赖；网络、写入目录和钥匙串访问仍受系统与 Codex 权限控制。不需要安装浏览器扩展或启动网页服务。
+
+`agents/openai.yaml` 提供 Codex 展示名称和默认提示词。两平台共用同一个 ZIP，但 Codex 推荐通过仓库路径安装。当前版本未在全新机器完成端到端转录验收，也不是官方精选或认证 Skill。
+
 ## WorkBuddy Skill（实验版）
 
 现在提供独立 Skill，不需要启动 Web 服务。首版面向 macOS 本地 WorkBuddy，Python 3.9+；Windows 和云端执行暂未支持。
