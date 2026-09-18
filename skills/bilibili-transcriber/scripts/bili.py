@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Local Skill entrypoint. stdout is JSON; secrets are never CLI arguments."""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from urllib.parse import urlparse
+
+SCRIPT = Path(__file__).resolve()
+
+
+def home():
+    return Path(os.environ.get('BILI_HOME', str(Path.home() / 'Library/Application Support/bilibili-transcriber'))).expanduser().resolve()
+
+
+def python():
+    return home() / 'runtime/bin/python'
+
+
+def emit(value):
+    print(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def save(path, value):
+    temp = path.with_suffix('.tmp')
+    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+    temp.replace(path)
+
+
+def normalize(value):
+    value = value.strip()
+    if re.fullmatch(r'BV[A-Za-z0-9]{10}', value):
+        return value
+    parsed = urlparse(value)
+    match = re.fullmatch(r'/video/(BV[A-Za-z0-9]{10})/?', parsed.path)
+    if parsed.scheme not in ('http', 'https') or parsed.hostname not in ('www.bilibili.com', 'bilibili.com') or parsed.username or parsed.password or parsed.port or not match:
+        raise ValueError('仅支持 BV 号或 bilibili.com/video/BV... 视频链接')
+    return match.group(1)
+
+
+def job_dir(job_id):
+    if not re.fullmatch(r'BV[A-Za-z0-9]{10}-(base|small|medium)', job_id):
+        raise ValueError('无效任务 ID')
+    return home() / 'jobs' / job_id
+
+
+def alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def ready():
+    if not python().exists():
+        return False
+    result = subprocess.run([str(python()), '-c', 'import yt_dlp, faster_whisper'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
+
+def doctor():
+    return {'platform': sys.platform, 'supported': sys.platform == 'darwin' and sys.version_info >= (3, 9), 'python': sys.version.split()[0], 'ffmpeg': bool(shutil.which('ffmpeg')), 'runtime_ready': ready(), 'data_dir': str(home()), 'model_download': '首次转录按需下载', 'cookie_mode': '默认匿名；--browser 显式启用本机浏览器'}
+
+
+def setup():
+    if sys.platform != 'darwin' or sys.version_info < (3, 9):
+        raise ValueError('首版需要 macOS 和 Python 3.9+')
+    home().mkdir(parents=True, exist_ok=True, mode=0o700)
+    subprocess.run([sys.executable, '-m', 'venv', str(home() / 'runtime')], check=True, stdout=sys.stderr)
+    subprocess.run([str(python()), '-m', 'pip', 'install', '-r', str(SCRIPT.with_name('requirements.txt'))], check=True, stdout=sys.stderr)
+    emit(doctor())
+
+
+def status(job_id):
+    directory = job_dir(job_id)
+    data = json.loads((directory / 'job.json').read_text(encoding='utf-8'))
+    if data['status'] in ('queued', 'running') and time.time() - data['updated_at'] > 15 and not alive(data.get('pid')):
+        data.update(status='failed', error='后台进程已退出，可重新 start 续跑')
+    return data
+
+
+def start(args):
+    bvid = normalize(args.url)
+    if not ready() or not shutil.which('ffmpeg'):
+        raise ValueError('环境未就绪，请先执行 doctor 和 setup，并安装 ffmpeg')
+    if args.browser and not re.fullmatch(r'(chrome|chromium|edge|firefox|brave|safari)(:[^/\\\r\n]{1,100})?', args.browser):
+        raise ValueError('不支持的浏览器/Profile')
+    job_id = bvid + '-' + args.model
+    directory = job_dir(job_id)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock = directory / 'worker.lock'
+    if lock.exists():
+        owner = json.loads(lock.read_text())
+        if alive(owner.get('pid')) or time.time() - owner.get('time', 0) < 15:
+            if (directory / 'job.json').exists():
+                emit(status(job_id))
+                return
+            raise ValueError('任务正在启动，请稍后查询')
+        lock.unlink()
+    if (directory / 'job.json').exists():
+        previous = status(job_id)
+        if previous['status'] == 'succeeded' and previous.get('files') and all(Path(f).exists() for f in previous['files']):
+            emit(previous)
+            return
+    with lock.open('x') as handle:
+        json.dump({'pid': os.getpid(), 'time': time.time()}, handle)
+    data = {'id': job_id, 'bvid': bvid, 'model': args.model, 'browser': args.browser, 'status': 'queued', 'step': 'download', 'updated_at': time.time(), 'files': []}
+    save(directory / 'job.json', data)
+    try:
+        with (directory / 'worker.log').open('ab') as log:
+            child = subprocess.Popen([str(python()), str(SCRIPT), '_run', job_id], stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+        emit({'id': job_id, 'status': 'queued', 'pid': child.pid, 'data_dir': str(directory)})
+    except Exception:
+        lock.unlink(missing_ok=True)
+        raise
+
+
+def worker(job_id):
+    directory = job_dir(job_id)
+    data = json.loads((directory / 'job.json').read_text())
+    save(directory / 'worker.lock', {'pid': os.getpid(), 'time': time.time()})
+    def update(**patch):
+        data.update(patch, updated_at=time.time(), pid=os.getpid())
+        save(directory / 'job.json', data)
+    def interrupted(signum, frame):
+        raise RuntimeError('任务中断')
+    signal.signal(signal.SIGTERM, interrupted)
+    try:
+        update(status='running', step='download', error='')
+        manifest = directory / 'audio-manifest.json'
+        audio = directory / 'audio.m4a'
+        if not (manifest.exists() and audio.exists()):
+            command = [str(python()), '-m', 'yt_dlp', '--ignore-config', '--no-playlist', '--no-progress', '--quiet', '--no-warnings', '--write-info-json', '-f', 'bestaudio', '-x', '--audio-format', 'm4a', '-o', str(directory / 'audio.%(ext)s')]
+            if data.get('browser'):
+                command += ['--cookies-from-browser', data['browser']]
+            command += ['--', 'https://www.bilibili.com/video/' + data['bvid'] + '/?p=1']
+            result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if result.returncode:
+                raise RuntimeError('音频下载失败：检查网络、B站访问权限或浏览器登录。匿名失败可在用户知情后指定 --browser chrome')
+            info = json.loads((directory / 'audio.info.json').read_text())
+            if not audio.exists():
+                raise RuntimeError('下载未生成音频')
+            save(manifest, [{'index': 1, 'id': data['bvid'], 'title': info.get('title', data['bvid']), 'audioFile': str(audio), 'duration': info.get('duration'), 'uploader': info.get('uploader', ''), 'source': 'bilibili'}])
+        update(step='transcribe')
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('AUDIO_', 'XYZ_', 'WHISPER_', 'TRANSCRIPT_'))}
+        env.update(AUDIO_CATALOG_DIR=str(directory), WHISPER_BACKEND='faster', WHISPER_MODEL=data['model'], WHISPER_DEVICE='cpu', WHISPER_COMPUTE_TYPE='int8', AUDIO_LANGUAGE='zh', HF_HOME=str(home() / 'cache'), PYTHONUNBUFFERED='1')
+        subprocess.run([str(python()), str(SCRIPT.with_name('transcribe_audio_local.py'))], env=env, check=True)
+        summary = json.loads((directory / 'transcripts' / data['model'] / 'transcription-summary.json').read_text())
+        files = sorted(str(p) for p in (directory / 'transcripts' / data['model']).iterdir() if p.suffix in ('.txt', '.srt', '.md'))
+        if summary.get('failureCount') or not any(p.endswith('.srt') for p in files):
+            raise RuntimeError('转录未完整成功，可重试；已有音频保留')
+        update(status='succeeded', step='done', files=files)
+    except Exception as error:
+        update(status='failed', error=str(error))
+    finally:
+        (directory / 'worker.lock').unlink(missing_ok=True)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest='command', required=True)
+    sub.add_parser('doctor'); sub.add_parser('setup')
+    start_parser = sub.add_parser('start')
+    start_parser.add_argument('url'); start_parser.add_argument('--browser', default=None)
+    start_parser.add_argument('--model', choices=['base', 'small', 'medium'], default='small')
+    for name in ('status', '_run'):
+        sub.add_parser(name).add_argument('job_id')
+    args = parser.parse_args()
+    try:
+        if args.command == 'doctor': emit(doctor())
+        elif args.command == 'setup': setup()
+        elif args.command == 'start': start(args)
+        elif args.command == 'status': emit(status(args.job_id))
+        else: worker(args.job_id)
+    except Exception as error:
+        emit({'status': 'error', 'error': str(error)})
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
