@@ -183,7 +183,7 @@ def worker(job_id):
             info = json.loads((directory / 'audio.info.json').read_text())
             if not audio.exists():
                 raise RuntimeError('下载未生成音频')
-            save(manifest, [{'index': 1, 'id': data['bvid'], 'title': info.get('title', data['bvid']), 'audioFile': str(audio), 'duration': info.get('duration'), 'uploader': info.get('uploader', ''), 'source': 'bilibili'}])
+            save(manifest, [{'index': 1, 'status': 'downloaded', 'id': data['bvid'], 'title': info.get('title', data['bvid']), 'audioFile': str(audio), 'duration': info.get('duration'), 'uploader': info.get('uploader', ''), 'source': 'bilibili'}])
         update(step='transcribe')
         env = {k: v for k, v in os.environ.items() if not k.startswith(('AUDIO_', 'XYZ_', 'WHISPER_', 'TRANSCRIPT_'))}
         env.update(AUDIO_CATALOG_DIR=str(directory), WHISPER_BACKEND='faster', WHISPER_MODEL=data['model'], WHISPER_DEVICE='cpu', WHISPER_COMPUTE_TYPE='int8', AUDIO_LANGUAGE='zh', HF_HOME=str(home() / 'cache'), PYTHONUNBUFFERED='1')
