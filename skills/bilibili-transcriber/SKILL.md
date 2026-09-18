@@ -25,6 +25,16 @@ description: 获取 B 站视频音频并在本机转录完整 TXT 和 SRT 字幕
 
 ## 转录
 
+### 初始化失败的恢复规则
+
+- setup 是非破坏性重试：环境已就绪则复用，未完成则在原目录重试，不清空目录。不要自行运行 `rm -rf`、递归删除、`venv --clear`，也不要自动移动整个环境。
+- JSON 错误包含 code、stage、原始错误和 runtime_dir。permission_denied 时展示具体路径，通过宿主正常授权流程处理；不要据此推断目录已损坏，或切换目录绕过沙箱。
+- setup_failed / filesystem_error / runtime_not_ready 时先检查原始错误（网络、磁盘、Python 兼容等），解决后最多重试一次；仍失败则停止并报告，不无限修复。
+- 不删除 jobs、cache、数据根目录或系统文件。确实需要重建时，先解释证据和精确 runtime 路径，让用户选择是否备份重建；当前脚本没有自动备份或清理命令。
+- WorkBuddy 出现批量删除弹窗时取消删除，回到上述诊断流程。安装 Skill 不授权任意清理用户文件。
+
+## 视频处理
+
 默认不读取浏览器 Cookie：
 
 ```sh

@@ -13,6 +13,36 @@ spec.loader.exec_module(bili)
 
 
 class SkillTests(unittest.TestCase):
+    def test_setup_permission_preserves_existing_data(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'BILI_HOME': temp}):
+            for name in ['runtime', 'jobs', 'cache']:
+                folder = Path(temp) / name
+                folder.mkdir()
+                (folder / 'keep').write_text('keep')
+            with patch.object(bili, 'ready', return_value=False), patch.object(bili.sys, 'platform', 'darwin'), patch.object(bili.subprocess, 'run') as run:
+                run.return_value.returncode = 1
+                run.return_value.stderr = 'Permission denied: runtime/bin/python'
+                with self.assertRaises(bili.SetupError) as caught: bili.setup()
+                self.assertEqual(caught.exception.code, 'permission_denied')
+                self.assertEqual(caught.exception.stage, 'create_venv')
+                self.assertEqual(run.call_count, 1)
+                self.assertNotIn('--clear', run.call_args.args[0])
+            for name in ['runtime', 'jobs', 'cache']:
+                self.assertEqual((Path(temp) / name / 'keep').read_text(), 'keep')
+
+    def test_setup_ready_does_not_reinstall(self):
+        with patch.object(bili.sys, 'platform', 'darwin'), patch.object(bili, 'ready', return_value=True), patch.object(bili, 'emit'), patch.object(bili.subprocess, 'run') as run:
+            bili.setup()
+            run.assert_not_called()
+
+    def test_setup_network_error_is_not_permission_error(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'BILI_HOME': temp}), patch.object(bili.sys, 'platform', 'darwin'), patch.object(bili, 'ready', return_value=False), patch.object(bili.subprocess, 'run') as run:
+            from subprocess import CompletedProcess
+            run.side_effect = [CompletedProcess([], 0, stderr=''), CompletedProcess([], 1, stderr='Connection timed out')]
+            with self.assertRaises(bili.SetupError) as caught: bili.setup()
+            self.assertEqual(caught.exception.code, 'setup_failed')
+            self.assertEqual(caught.exception.stage, 'install_dependencies')
+
     def test_url_validation(self):
         self.assertEqual(bili.normalize('https://www.bilibili.com/video/BV1mZYj6VEwb/?spm=x'), 'BV1mZYj6VEwb')
         for url in ['https://evil.com/video/BV1mZYj6VEwb', 'https://bilibili.com.evil.com/video/BV1mZYj6VEwb', 'file:///video/BV1mZYj6VEwb', 'https://x@bilibili.com/video/BV1mZYj6VEwb', 'BV1mZYj6VEwb;rm -rf /']:

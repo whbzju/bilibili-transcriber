@@ -15,6 +15,18 @@ from urllib.parse import urlparse
 SCRIPT = Path(__file__).resolve()
 
 
+class SetupError(Exception):
+    def __init__(self, code, stage, detail):
+        super().__init__(detail)
+        self.code, self.stage = code, stage
+
+    def payload(self):
+        return {'status': 'error', 'code': self.code, 'stage': self.stage,
+                'error': str(self), 'runtime_dir': str(home() / 'runtime'),
+                'preserved': True,
+                'next_action': '保留已有文件。权限问题按宿主授权流程处理；其他错误先检查原始错误。解决原因后重试同一 setup 命令。不要自动删除或移动 runtime、jobs、cache 或数据根目录，不要使用 sudo 或改目录绕过沙箱。'}
+
+
 def home():
     return Path(os.environ.get('BILI_HOME', str(Path.home() / 'Library/Application Support/bilibili-transcriber'))).expanduser().resolve()
 
@@ -61,7 +73,10 @@ def alive(pid):
 def ready():
     if not python().exists():
         return False
-    result = subprocess.run([str(python()), '-c', 'import yt_dlp, faster_whisper'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        result = subprocess.run([str(python()), '-c', 'import yt_dlp, faster_whisper'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0
 
 
@@ -72,9 +87,30 @@ def doctor():
 def setup():
     if sys.platform != 'darwin' or sys.version_info < (3, 9):
         raise ValueError('首版需要 macOS 和 Python 3.9+')
-    home().mkdir(parents=True, exist_ok=True, mode=0o700)
-    subprocess.run([sys.executable, '-m', 'venv', str(home() / 'runtime')], check=True, stdout=sys.stderr)
-    subprocess.run([str(python()), '-m', 'pip', 'install', '-r', str(SCRIPT.with_name('requirements.txt'))], check=True, stdout=sys.stderr)
+    if ready():
+        emit(doctor())
+        return
+    stage = 'create_directory'
+    try:
+        home().mkdir(parents=True, exist_ok=True, mode=0o700)
+        commands = [
+            ('create_venv', [sys.executable, '-m', 'venv', str(home() / 'runtime')]),
+            ('install_dependencies', [str(python()), '-m', 'pip', 'install', '-r', str(SCRIPT.with_name('requirements.txt'))]),
+        ]
+        # Re-running venv without --clear preserves the existing directory.
+        for stage, command in commands:
+            result = subprocess.run(command, stdout=sys.stderr, stderr=subprocess.PIPE, text=True)
+            if result.returncode:
+                detail = (result.stderr or '')[-6000:]
+                permission = any(term in detail.lower() for term in ('permission denied', 'operation not permitted', 'errno 13', 'errno 1]'))
+                raise SetupError('permission_denied' if permission else 'setup_failed', stage, detail or f'exit {result.returncode}')
+        stage = 'verify_runtime'
+        if not ready():
+            raise SetupError('runtime_not_ready', stage, '依赖安装后导入检查未通过，保留环境供检查')
+    except PermissionError as error:
+        raise SetupError('permission_denied', stage, str(error)) from error
+    except OSError as error:
+        raise SetupError('filesystem_error', stage, str(error)) from error
     emit(doctor())
 
 
@@ -179,6 +215,9 @@ def main():
         elif args.command == 'start': start(args)
         elif args.command == 'status': emit(status(args.job_id))
         else: worker(args.job_id)
+    except SetupError as error:
+        emit(error.payload())
+        return 1
     except Exception as error:
         emit({'status': 'error', 'error': str(error)})
         return 1

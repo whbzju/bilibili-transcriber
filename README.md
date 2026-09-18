@@ -4,7 +4,7 @@
 
 **macOS 实验版 · MIT 开源 · 本地 Whisper 转录 · 无需转录 API Key**
 
-[下载 Skill ZIP](https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.2/bilibili-transcriber-skill.zip) · [版本发布](https://github.com/whbzju/bilibili-transcriber/releases) · [Skill 源码](skills/bilibili-transcriber) · [反馈问题](https://github.com/whbzju/bilibili-transcriber/issues)
+[下载 Skill ZIP](https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.3/bilibili-transcriber-skill.zip) · [版本发布](https://github.com/whbzju/bilibili-transcriber/releases) · [Skill 源码](skills/bilibili-transcriber) · [反馈问题](https://github.com/whbzju/bilibili-transcriber/issues)
 
 > 三个平台共用同一份 `SKILL.md` 和 Python 程序，区别在安装入口。当前交付的是 **Skill 包，不是已上架各平台市场的插件**。支持接入不等于所有平台均已完成实机验收，详见下方验证状态。
 
@@ -37,7 +37,7 @@
 
 ```text
 请使用 $skill-installer 安装这个 Skill：
-https://github.com/whbzju/bilibili-transcriber/tree/v0.2.0-alpha.2/skills/bilibili-transcriber
+https://github.com/whbzju/bilibili-transcriber/tree/v0.2.0-alpha.3/skills/bilibili-transcriber
 ```
 
 安装后在新会话中发送：
@@ -55,7 +55,7 @@ https://github.com/whbzju/bilibili-transcriber/tree/v0.2.0-alpha.2/skills/bilibi
 
 ```text
 请下载并检查这个 Skill 包：
-https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.2/bilibili-transcriber-skill.zip
+https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.3/bilibili-transcriber-skill.zip
 将其中完整的 bilibili-transcriber 文件夹安装到 ~/.claude/skills/。
 如果同名目录已经存在，先检查版本，不要直接覆盖。
 安装后按 SKILL.md 检查环境并协助初始化。
@@ -99,7 +99,7 @@ https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.2/
 
 ```text
 请帮我下载安装这个 Skill：
-https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.2/bilibili-transcriber-skill.zip
+https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.3/bilibili-transcriber-skill.zip
 安装后检查运行环境，缺少依赖时协助我完成初始化。
 ```
 
@@ -220,6 +220,16 @@ python3 skills/bilibili-transcriber/scripts/bili.py status BVxxxxxxxxxx-small
 ```
 
 模型选项：`base`、`small`、`medium`。命令以 JSON 返回状态，任务成功以 `status=succeeded` 为准，不以“命令已启动”为准。更换模型会建立不同任务。
+
+## 初始化失败与权限提示
+
+新版 setup 会保留已有环境与数据，并返回结构化错误（失败阶段、具体路径和恢复建议）。可用环境直接复用；部分安装在原目录重试，不自动清空。
+
+- WorkBuddy 提示批量删除时，请选取消，不执行 `rm -rf` 或 `venv --clear`。
+- 权限不足：按宿主正常授权流程处理，不因写入被拒绝就删除环境。
+- 网络或依赖失败：先处理原始错误，再重试 setup；持续失败时停止，不反复清理。
+- 确需重建：先确认精确 runtime 路径，由用户决定是否备份重建。工具不提供自动清理命令，不删除 jobs、cache 或整个数据目录。
+- 已安装旧版的用户需更新 Skill 才能获得这些规则；更新时保留数据目录。新版 ZIP 不会自动替换本机已安装技能。
 
 ## 常见问题
 
