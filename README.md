@@ -4,7 +4,7 @@
 
 **macOS 实验版 · MIT 开源 · 本地 Whisper 转录 · 无需转录 API Key**
 
-[下载 Skill ZIP](https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.3/bilibili-transcriber-skill.zip) · [版本发布](https://github.com/whbzju/bilibili-transcriber/releases) · [Skill 源码](skills/bilibili-transcriber) · [反馈问题](https://github.com/whbzju/bilibili-transcriber/issues)
+[下载 Skill ZIP](https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.4/bilibili-transcriber-skill.zip) · [版本发布](https://github.com/whbzju/bilibili-transcriber/releases) · [Skill 源码](skills/bilibili-transcriber) · [反馈问题](https://github.com/whbzju/bilibili-transcriber/issues)
 
 > 三个平台共用同一份 `SKILL.md` 和 Python 程序，区别在安装入口。当前交付的是 **Skill 包，不是已上架各平台市场的插件**。支持接入不等于所有平台均已完成实机验收，详见下方验证状态。
 
@@ -37,7 +37,7 @@
 
 ```text
 请使用 $skill-installer 安装这个 Skill：
-https://github.com/whbzju/bilibili-transcriber/tree/v0.2.0-alpha.3/skills/bilibili-transcriber
+https://github.com/whbzju/bilibili-transcriber/tree/v0.2.0-alpha.4/skills/bilibili-transcriber
 ```
 
 安装后在新会话中发送：
@@ -55,7 +55,7 @@ https://github.com/whbzju/bilibili-transcriber/tree/v0.2.0-alpha.3/skills/bilibi
 
 ```text
 请下载并检查这个 Skill 包：
-https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.3/bilibili-transcriber-skill.zip
+https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.4/bilibili-transcriber-skill.zip
 将其中完整的 bilibili-transcriber 文件夹安装到 ~/.claude/skills/。
 如果同名目录已经存在，先检查版本，不要直接覆盖。
 安装后按 SKILL.md 检查环境并协助初始化。
@@ -99,7 +99,7 @@ https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.3/
 
 ```text
 请帮我下载安装这个 Skill：
-https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.3/bilibili-transcriber-skill.zip
+https://github.com/whbzju/bilibili-transcriber/releases/download/v0.2.0-alpha.4/bilibili-transcriber-skill.zip
 安装后检查运行环境，缺少依赖时协助我完成初始化。
 ```
 
@@ -167,7 +167,8 @@ Agent 查询 status → 读取文稿 → 总结、分析、交付文件
 - **Skill 是操作说明**：指导 Agent 调用工具、处理错误与交付结果。
 - **Python 程序负责执行**：用参数列表启动子进程，限定 B 站视频输入，不把链接拼成 shell 命令。
 - **Cookie 按需启用**：默认不读取浏览器；指定 `--browser` 时使用 yt-dlp 的浏览器 Cookie 读取能力。
-- **结果与续跑**：任务 ID 为 `BV号-模型`。成功结果仍存在时直接复用；失败后重新 start，有音频与 manifest 时跳过下载。不是从音频断点继续识别，未完成的单条转录可能重新执行。
+- **结果与续跑**：任务 ID 为 `BV号-模型`。成功结果仍存在时直接复用；失败后重新 start，有音频与 manifest 时跳过下载。旧 manifest 缺少 `status` 时，仅在对应音频文件存在且非空后自动补为 `exists`，不覆盖显式失败状态。不是从音频断点继续识别，未完成的单条转录可能重新执行。
+- **转录验收**：新下载的清单标记为 `downloaded`；未选中音频（`selectedCount=0`）会明确报错，不误报成功。成功任务要求 TXT 和 SRT 产物均非空。
 - **后台状态**：start 快速返回任务 ID，status 返回阶段、错误与产物。进程退出后的状态检查可以识别中断。
 - **不依赖网页服务**：Skill 无需启动 8719 端口，也不依赖浏览器扩展或远程 MCP。
 

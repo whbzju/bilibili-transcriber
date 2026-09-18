@@ -158,6 +158,29 @@ def start(args):
         raise
 
 
+def prepare_manifest(manifest):
+    items = json.loads(manifest.read_text(encoding='utf-8'))
+    if not isinstance(items, list) or not items:
+        raise RuntimeError('音频清单为空或格式无效，未选中音频')
+    changed = False
+    eligible = 0
+    for item in items:
+        if not isinstance(item, dict) or not item.get('audioFile'):
+            raise RuntimeError('音频清单缺少 audioFile')
+        audio = Path(item['audioFile'])
+        if not audio.is_file() or audio.stat().st_size == 0:
+            raise RuntimeError('音频清单对应文件不存在或为空，保留清单供检查')
+        if 'status' not in item:
+            item['status'] = 'exists'
+            changed = True
+        if item['status'] in ('downloaded', 'exists'):
+            eligible += 1
+    if not eligible:
+        raise RuntimeError('未选中音频：清单 status 必须为 downloaded 或 exists')
+    if changed:
+        save(manifest, items)
+
+
 def worker(job_id):
     directory = job_dir(job_id)
     data = json.loads((directory / 'job.json').read_text())
@@ -181,16 +204,19 @@ def worker(job_id):
             if result.returncode:
                 raise RuntimeError('音频下载失败：检查网络、B站访问权限或浏览器登录。匿名失败可在用户知情后指定 --browser chrome')
             info = json.loads((directory / 'audio.info.json').read_text())
-            if not audio.exists():
-                raise RuntimeError('下载未生成音频')
-            save(manifest, [{'index': 1, 'id': data['bvid'], 'title': info.get('title', data['bvid']), 'audioFile': str(audio), 'duration': info.get('duration'), 'uploader': info.get('uploader', ''), 'source': 'bilibili'}])
+            if not audio.is_file() or audio.stat().st_size == 0:
+                raise RuntimeError('下载未生成有效音频')
+            save(manifest, [{'index': 1, 'id': data['bvid'], 'title': info.get('title', data['bvid']), 'audioFile': str(audio), 'duration': info.get('duration'), 'uploader': info.get('uploader', ''), 'source': 'bilibili', 'status': 'downloaded'}])
         update(step='transcribe')
+        prepare_manifest(manifest)
         env = {k: v for k, v in os.environ.items() if not k.startswith(('AUDIO_', 'XYZ_', 'WHISPER_', 'TRANSCRIPT_'))}
         env.update(AUDIO_CATALOG_DIR=str(directory), WHISPER_BACKEND='faster', WHISPER_MODEL=data['model'], WHISPER_DEVICE='cpu', WHISPER_COMPUTE_TYPE='int8', AUDIO_LANGUAGE='zh', HF_HOME=str(home() / 'cache'), PYTHONUNBUFFERED='1')
         subprocess.run([str(python()), str(SCRIPT.with_name('transcribe_audio_local.py'))], env=env, check=True)
         summary = json.loads((directory / 'transcripts' / data['model'] / 'transcription-summary.json').read_text())
+        if not summary.get('selectedCount'):
+            raise RuntimeError('未选中音频（selectedCount=0），请检查清单状态与筛选条件；音频已保留')
         files = sorted(str(p) for p in (directory / 'transcripts' / data['model']).iterdir() if p.suffix in ('.txt', '.srt', '.md'))
-        if summary.get('failureCount') or not any(p.endswith('.srt') for p in files):
+        if summary.get('failureCount') or not all(any(p.endswith(ext) and Path(p).stat().st_size > 0 for p in files) for ext in ('.srt', '.txt')):
             raise RuntimeError('转录未完整成功，可重试；已有音频保留')
         update(status='succeeded', step='done', files=files)
     except Exception as error:
